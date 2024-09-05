@@ -4,9 +4,9 @@ module Tailwindcss
   class Engine < ::Rails::Engine
     class << self
       def globs
-        Rails.application.config.assets.tailwind_roots.flat_map do |path|
+        (Rails.application.config.assets.tailwind_roots.flat_map do |path|
           Rails.application.config.assets.tailwind_source_paths.map { |source| "#{path}/#{source}" }
-        end + Rails.application.config.assets.tailwind_custom_paths
+        end + Rails.application.config.assets.tailwind_custom_paths).uniq
       end
     end
 
