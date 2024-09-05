@@ -75,8 +75,13 @@ module Tailwindcss
 
       def compile_command(debug: false, **kwargs)
         tailwind_config_contents = File.read(Rails.root.join("config/tailwind.config.js"))
-        config_path = if tailwind_config_contents.include?('content: []')
-                        tailwind_config_contents.gsub!('content: []','content: <%= Tailwindcss::Engine.globs.to_json %>')
+        config_path = if tailwind_config_contents.include?('content: ')
+                        globs_array = tailwind_config_contents.match(/content:\s*(\[[\s\S]*?\]|\{[\s\S]*?}|\([^)]*\))/m)[1]
+                        globs_array.gsub!(/'/,'"')
+                        globs = JSON.parse(globs_array)
+                        globs.map! { |glob| glob.gsub(/^\./, Rails.root.to_s) }
+                        Rails.application.config.assets.tailwind_custom_paths.concat(globs)
+                        tailwind_config_contents.gsub!(/content:\s*(\[[\s\S]*?\]|\{[\s\S]*?}|\([^)]*\))/,"content: <%= Tailwindcss::Engine.globs.to_json %>")
 
                         tailwind_config_template = ERB.new(tailwind_config_contents)
                         tailwind_config = Tempfile.new("tailwind-config").tap do |f|
@@ -90,7 +95,7 @@ module Tailwindcss
                         end
                         tailwind_config.path
                       else
-                        puts "WARNING: not empty content config found in config/tailwind.config.js, keeping it as-is"
+                        puts "WARNING: no content config found in config/tailwind.config.js, keeping it as-is"
                         Rails.root.join("config/tailwind.config.js").to_s
                       end
 
