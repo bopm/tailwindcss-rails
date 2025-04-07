@@ -1,5 +1,8 @@
 require "test_helper"
 require "minitest/mock"
+require "tmpdir"
+require "ostruct"
+require "active_support/core_ext/class/subclasses"
 
 class Tailwindcss::CommandsTest < ActiveSupport::TestCase
   attr_accessor :executable
@@ -16,8 +19,31 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
     end
   end
 
+  def with_rails_mocks(root: Pathname.new(Dir.mktmpdir), engines: [])
+    mock_config = Object.new
+    def mock_config.tailwindcss_rails
+      @tailwindcss_rails ||= OpenStruct.new(engines: @engines)
+    end
+    def mock_config.assets
+      @assets ||= OpenStruct.new(css_compressor: nil)
+    end
+    mock_config.instance_variable_set(:@engines, engines)
+
+    mock_application = Object.new
+    def mock_application.config
+      @config
+    end
+    mock_application.instance_variable_set(:@config, mock_config)
+
+    Rails.stub(:root, root) do
+      Rails.stub(:application, mock_application) do
+        yield
+      end
+    end
+  end
+
   test ".compile_command" do
-    Rails.stub(:root, File) do # Rails.root won't work in this test suite
+    with_rails_mocks do
       actual = Tailwindcss::Commands.compile_command
       assert_kind_of(Array, actual)
       assert_equal(executable, actual.first)
@@ -27,7 +53,7 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
   end
 
   test ".compile_command debug flag" do
-    Rails.stub(:root, File) do # Rails.root won't work in this test suite
+    with_rails_mocks do
       actual = Tailwindcss::Commands.compile_command
       assert_kind_of(Array, actual)
       assert_equal(executable, actual.first)
@@ -42,7 +68,7 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
 
   test ".compile_command debug environment variable" do
     begin
-      Rails.stub(:root, File) do # Rails.root won't work in this test suite
+      with_rails_mocks do
         ENV["TAILWINDCSS_DEBUG"] = ""
         actual = Tailwindcss::Commands.compile_command
         assert_kind_of(Array, actual)
@@ -67,7 +93,7 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
   end
 
   test ".compile_command when Rails compression is on" do
-    Rails.stub(:root, File) do # Rails.root won't work in this test suite
+    with_rails_mocks do
       Tailwindcss::Commands.stub(:rails_css_compressor?, true) do
         actual = Tailwindcss::Commands.compile_command
         assert_kind_of(Array, actual)
@@ -84,13 +110,14 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
 
   test ".compile_command when postcss.config.js exists" do
     Dir.mktmpdir do |tmpdir|
-      Rails.stub(:root, Pathname.new(tmpdir))  do # Rails.root won't work in this test suite
+      root = Pathname.new(tmpdir)
+      with_rails_mocks(root: root) do
         actual = Tailwindcss::Commands.compile_command
         assert_kind_of(Array, actual)
         assert_equal(executable, actual.first)
         refute_includes(actual, "--postcss")
 
-        config_file = Rails.root.join("postcss.config.js")
+        config_file = root.join("postcss.config.js")
         FileUtils.touch(config_file)
         actual = Tailwindcss::Commands.compile_command
         assert_kind_of(Array, actual)
@@ -103,7 +130,7 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
   end
 
   test ".watch_command" do
-    Rails.stub(:root, File) do # Rails.root won't work in this test suite
+    with_rails_mocks do
       actual = Tailwindcss::Commands.watch_command
       assert_kind_of(Array, actual)
       assert_equal(executable, actual.first)
@@ -135,7 +162,7 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
   end
 
   test ".engines_roots when there are no engines" do
-    Rails.stub(:root, Pathname.new("/dummy")) do
+    with_rails_mocks do
       Rails::Engine.stub(:subclasses, []) do
         assert_empty Tailwindcss::Commands.engines_roots
       end
@@ -169,16 +196,6 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
         define_singleton_method(:root) { engine_root3 }
       end
 
-      # Create mock specs for engines
-      spec1 = Minitest::Mock.new
-      spec1.expect(:dependencies, [Gem::Dependency.new("tailwindcss-rails")])
-
-      spec2 = Minitest::Mock.new
-      spec2.expect(:dependencies, [Gem::Dependency.new("tailwindcss-rails")])
-
-      spec3 = Minitest::Mock.new
-      spec3.expect(:dependencies, [])
-
       # Set up file structure
       engine1_css = engine_root1.join("app/assets/tailwind/test_engine1/application.css")
       engine2_css = root.join("app/assets/tailwind/test_engine2/application.css")
@@ -189,27 +206,16 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
         FileUtils.touch(css_path)
       end
 
-      find_by_name_results = {
-        "test_engine1" => spec1,
-        "test_engine2" => spec2,
-        "test_engine3" => spec3,
-      }
+      with_rails_mocks(root: root, engines: %w[test_engine1 test_engine2]) do
+        Rails::Engine.stub(:descendants, [engine1, engine2, engine3]) do
+          roots = Tailwindcss::Commands.engines_roots
 
-      Gem::Specification.stub(:find_by_name, ->(name) { find_by_name_results[name] }) do
-        Rails.stub(:root, root) do
-          Rails::Engine.stub(:subclasses, [engine1, engine2]) do
-            roots = Tailwindcss::Commands.engines_roots
-
-            assert_equal 2, roots.size
-            assert_includes roots, engine1_css.to_s
-            assert_includes roots, engine2_css.to_s
-            assert_not_includes roots, engine3_css.to_s
-          end
+          assert_equal 2, roots.size
+          assert_includes roots, engine1_css.to_s
+          assert_includes roots, engine2_css.to_s
+          assert_not_includes roots, engine3_css.to_s
         end
       end
-
-      spec1.verify
-      spec2.verify
     end
   end
 
@@ -217,23 +223,36 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
     Dir.mktmpdir do |tmpdir|
       root = Pathname.new(tmpdir)
 
-      # Create necessary files
-      app_css = root.join("app/assets/tailwind/application.css")
-      FileUtils.mkdir_p(File.dirname(app_css))
-      FileUtils.touch(app_css)
+      # Create engine files
+      engine_root = root.join('engine1')
+      FileUtils.mkdir_p(engine_root)
 
-      engine_css = root.join("app/assets/tailwind/test_engine/application.css")
+      engine = Class.new(Rails::Engine) do
+        define_singleton_method(:engine_name) { "test_engine" }
+        define_singleton_method(:root) { engine_root }
+      end
+
+      app_css = root.join("app/assets/tailwind/application.css")
+      engine_css = engine_root.join("app/assets/tailwind/test_engine/application.css")
+
+      FileUtils.mkdir_p(File.dirname(app_css))
       FileUtils.mkdir_p(File.dirname(engine_css))
+      FileUtils.touch(app_css)
       FileUtils.touch(engine_css)
 
-      Rails.stub(:root, root) do
-        Tailwindcss::Commands.stub(:engines_roots, [engine_css.to_s]) do
+      with_rails_mocks(root: root, engines: ["test_engine"]) do
+        Rails::Engine.stub(:descendants, [engine]) do
+          Tailwindcss::Commands.remove_tempfile!
           css_path = Tailwindcss::Commands.application_css
-          assert_equal css_path, Tailwindcss::Commands.class_variable_get(:@@tempfile).path
 
+          assert File.exist?(css_path), "Tempfile should exist"
           content = File.read(css_path)
-          assert_match "@import \"#{engine_css}\";", content
-          assert_match "@import \"#{app_css}\";", content
+          expected_content = <<~CSS
+            @import "#{engine_css}";
+  
+            @import "#{app_css}";
+          CSS
+          assert_equal expected_content, content
         end
       end
     end
@@ -247,11 +266,9 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
       FileUtils.mkdir_p(File.dirname(app_css))
       FileUtils.touch(app_css)
 
-      Rails.stub(:root, root) do
-        Tailwindcss::Commands.stub(:engines_roots, []) do
-          css_path = Tailwindcss::Commands.application_css
-          assert_equal app_css.to_s, css_path
-        end
+      with_rails_mocks(root: root) do
+        css_path = Tailwindcss::Commands.application_css
+        assert_equal app_css.to_s, css_path
       end
     end
   end
@@ -259,15 +276,17 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
   test ".remove_tempfile! cleans up temporary file" do
     Dir.mktmpdir do |tmpdir|
       root = Pathname.new(tmpdir)
+      app_css = root.join("app/assets/tailwind/application.css")
+      FileUtils.mkdir_p(File.dirname(app_css))
+      FileUtils.touch(app_css)
 
-      Rails.stub(:root, root) do
-        Tailwindcss::Commands.stub(:engines_roots, ["dummy_engine"]) do
-          css_path = Tailwindcss::Commands.application_css
-          assert File.exist?(css_path)
+      with_rails_mocks(root: root, engines: ["test_engine"]) do
+        Tailwindcss::Commands.remove_tempfile!
+        css_path = Tailwindcss::Commands.application_css
+        assert File.exist?(css_path), "Tempfile should exist before removal"
 
-          Tailwindcss::Commands.remove_tempfile!
-          refute File.exist?(css_path)
-        end
+        Tailwindcss::Commands.remove_tempfile!
+        refute File.exist?(css_path), "Tempfile should not exist after removal"
       end
     end
   end

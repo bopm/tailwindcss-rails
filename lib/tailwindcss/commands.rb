@@ -8,9 +8,9 @@ module Tailwindcss
       end
 
       def remove_tempfile!
-        if @@tempfile
-          @@tempfile.unlink
-          @@tempfile = nil
+        if class_variable_defined?(:@@tempfile) && @@tempfile
+          @@tempfile.unlink if File.exist?(@@tempfile.path)
+          remove_class_variable(:@@tempfile)
         end
       end
 
@@ -19,7 +19,7 @@ module Tailwindcss
 
         command = [
           Tailwindcss::Ruby.executable(**kwargs),
-          "-i", application_css.to_s,
+          "-i", input.to_s,
           "-o", rails_root.join("app/assets/builds/tailwind.css").to_s,
         ]
 
@@ -35,10 +35,13 @@ module Tailwindcss
         return rails_root.join("app/assets/tailwind/application.css").to_s if engines_roots.empty?
 
         @@tempfile = Tempfile.new("tailwind.application.css")
+
+        # Write content to tempfile
         engines_roots.each do |root|
-          @@tempfile.puts "@import \"#{root}\";"
+          @@tempfile.write("@import \"#{root}\";\n")
         end
-        @@tempfile.puts "\n@import \"#{rails_root.join('app/assets/tailwind/application.css')}\";"
+        @@tempfile.write("\n@import \"#{rails_root.join('app/assets/tailwind/application.css')}\";\n")
+        @@tempfile.flush
         @@tempfile.close
 
         @@tempfile.path
@@ -65,13 +68,8 @@ module Tailwindcss
       def engines_roots
         return [] unless defined?(Rails)
 
-        Rails::Engine.subclasses.select do |engine|
-          begin
-            spec = Gem::Specification.find_by_name(engine.engine_name)
-            spec.dependencies.any? { |d| d.name == 'tailwindcss-rails' }
-          rescue Gem::MissingSpecError
-            false
-          end
+        Rails::Engine.descendants.select do |engine|
+          engine.engine_name.in?(Rails.application.config.tailwindcss_rails.engines)
         end.map do |engine|
           [
             rails_root.join("app/assets/tailwind/#{engine.engine_name}/application.css"),
