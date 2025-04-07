@@ -8,7 +8,10 @@ module Tailwindcss
       end
 
       def remove_tempfile!
-        @@tempfile.unlink if @@tempfile
+        if @@tempfile
+          @@tempfile.unlink
+          @@tempfile = nil
+        end
       end
 
       def compile_command(input: application_css, debug: false, **kwargs)
@@ -16,7 +19,7 @@ module Tailwindcss
 
         command = [
           Tailwindcss::Ruby.executable(**kwargs),
-          "-i", application_css,
+          "-i", application_css.to_s,
           "-o", rails_root.join("app/assets/builds/tailwind.css").to_s,
         ]
 
@@ -29,18 +32,16 @@ module Tailwindcss
       end
 
       def application_css
-        if engines_roots.any?
-          @@tempfile = Tempfile.new("tailwind.application.css")
-          engines_roots.each do |root|
-            @@tempfile.puts "@import \"#{root}\";"
-          end
-          @@tempfile.puts "\n@import \"#{rails_root.join('app/assets/tailwind/application.css')}\";"
-          @@tempfile.close
+        return rails_root.join("app/assets/tailwind/application.css").to_s if engines_roots.empty?
 
-          @@tempfile.path
-        else
-          rails_root.join("app/assets/tailwind/application.css").to_s
+        @@tempfile = Tempfile.new("tailwind.application.css")
+        engines_roots.each do |root|
+          @@tempfile.puts "@import \"#{root}\";"
         end
+        @@tempfile.puts "\n@import \"#{rails_root.join('app/assets/tailwind/application.css')}\";"
+        @@tempfile.close
+
+        @@tempfile.path
       end
 
       def watch_command(always: false, poll: false, **kwargs)

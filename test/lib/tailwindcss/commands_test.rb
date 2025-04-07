@@ -11,9 +11,8 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
 
   def teardown
     super
-    if Tailwindcss::Commands.class_variable_defined?(:@@application_css)
+    if Tailwindcss::Commands.class_variable_defined?(:@@tempfile)
       Tailwindcss::Commands.remove_tempfile!
-      Tailwindcss::Commands.remove_class_variable(:@@application_css)
     end
   end
 
@@ -230,7 +229,7 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
       Rails.stub(:root, root) do
         Tailwindcss::Commands.stub(:engines_roots, [engine_css.to_s]) do
           css_path = Tailwindcss::Commands.application_css
-          assert Tailwindcss::Commands.tempfile_path?(css_path)
+          assert_equal css_path, Tailwindcss::Commands.class_variable_get(:@@tempfile).path
 
           content = File.read(css_path)
           assert_match "@import \"#{engine_css}\";", content
@@ -266,7 +265,6 @@ class Tailwindcss::CommandsTest < ActiveSupport::TestCase
           css_path = Tailwindcss::Commands.application_css
           assert File.exist?(css_path)
 
-          debugger
           Tailwindcss::Commands.remove_tempfile!
           refute File.exist?(css_path)
         end
