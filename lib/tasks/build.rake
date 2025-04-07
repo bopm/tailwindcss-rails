@@ -5,12 +5,11 @@ namespace :tailwindcss do
     verbose = args.extras.include?("verbose")
 
     command = Tailwindcss::Commands.compile_command(debug: debug)
-    Tailwindcss::Commands.enhance_command(command) do |transformed_command|
-      env = Tailwindcss::Commands.command_env(verbose: verbose)
-      puts "Running: #{Shellwords.join(command)}" if verbose
+    env = Tailwindcss::Commands.command_env(verbose: verbose)
+    puts "Running: #{Shellwords.join(command)}" if verbose
 
-      system(env, *command, exception: true)
-    end
+    system(env, *command, exception: true)
+    remove_tempfile!
   end
 
   desc "Watch and build your Tailwind CSS on file changes"
@@ -21,14 +20,14 @@ namespace :tailwindcss do
     verbose = args.extras.include?("verbose")
 
     command = Tailwindcss::Commands.watch_command(always: always, debug: debug, poll: poll)
-    Tailwindcss::Commands.enhance_command(command) do |transformed_command|
-      env = Tailwindcss::Commands.command_env(verbose: verbose)
-      puts "Running: #{Shellwords.join(command)}" if verbose
+    env = Tailwindcss::Commands.command_env(verbose: verbose)
+    puts "Running: #{Shellwords.join(command)}" if verbose
 
-      system(env, *command)
-    end
+    system(env, *command)
   rescue Interrupt
     puts "Received interrupt, exiting tailwindcss:watch" if args.extras.include?("verbose")
+  ensure
+    remove_tempfile!
   end
 end
 
