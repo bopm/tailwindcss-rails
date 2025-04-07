@@ -8,10 +8,11 @@ module Tailwindcss
       end
 
       def remove_tempfile!
-        if class_variable_defined?(:@@tempfile) && @@tempfile
-          @@tempfile.unlink if File.exist?(@@tempfile.path)
-          remove_class_variable(:@@tempfile)
-        end
+        return unless class_variable_defined?(:@@tempfile) && @@tempfile
+
+        @@tempfile.close unless @@tempfile.closed?
+        @@tempfile.unlink if File.exist?(@@tempfile.path)
+        remove_class_variable(:@@tempfile)
       end
 
       def compile_command(input: application_css, debug: false, **kwargs)
@@ -67,6 +68,7 @@ module Tailwindcss
 
       def engines_roots
         return [] unless defined?(Rails)
+        return [] unless Rails.application&.config&.tailwindcss_rails&.engines
 
         Rails::Engine.descendants.select do |engine|
           engine.engine_name.in?(Rails.application.config.tailwindcss_rails.engines)
