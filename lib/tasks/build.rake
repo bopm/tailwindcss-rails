@@ -9,7 +9,7 @@ namespace :tailwindcss do
     puts "Running: #{Shellwords.join(command)}" if verbose
 
     system(env, *command, exception: true)
-    remove_tempfile!
+    Tailwindcss::Commands.remove_tempfile!
   end
 
   desc "Watch and build your Tailwind CSS on file changes"
@@ -27,7 +27,7 @@ namespace :tailwindcss do
   rescue Interrupt
     puts "Received interrupt, exiting tailwindcss:watch" if args.extras.include?("verbose")
   ensure
-    remove_tempfile!
+    Tailwindcss::Commands.remove_tempfile!
   end
 end
 
