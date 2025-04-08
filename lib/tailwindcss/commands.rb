@@ -3,13 +3,24 @@ require "tailwindcss/ruby"
 module Tailwindcss
   module Commands
     class << self
-      def compile_command(debug: false, **kwargs)
+      def rails_root
+        defined?(Rails) ? Rails.root : Pathname.new(Dir.pwd)
+      end
+
+      def remove_tempfile!
+        return unless class_variable_defined?(:@@tempfile) && @@tempfile
+
+        @@tempfile.close unless @@tempfile.closed?
+        @@tempfile.unlink if File.exist?(@@tempfile.path)
+        remove_class_variable(:@@tempfile)
+      end
+
+      def compile_command(input: application_css, debug: false, **kwargs)
         debug = ENV["TAILWINDCSS_DEBUG"].present? if ENV.key?("TAILWINDCSS_DEBUG")
-        rails_root = defined?(Rails) ? Rails.root : Pathname.new(Dir.pwd)
 
         command = [
           Tailwindcss::Ruby.executable(**kwargs),
-          "-i", rails_root.join("app/assets/tailwind/application.css").to_s,
+          "-i", input.to_s,
           "-o", rails_root.join("app/assets/builds/tailwind.css").to_s,
         ]
 
@@ -19,6 +30,22 @@ module Tailwindcss
         command += ["--postcss", postcss_path.to_s] if File.exist?(postcss_path)
 
         command
+      end
+
+      def application_css
+        return rails_root.join("app/assets/tailwind/application.css").to_s if engines_roots.empty?
+
+        @@tempfile = Tempfile.new("tailwind.application.css")
+
+        # Write content to tempfile
+        engines_roots.each do |root|
+          @@tempfile.write("@import \"#{root}\";\n")
+        end
+        @@tempfile.write("\n@import \"#{rails_root.join('app/assets/tailwind/application.css')}\";\n")
+        @@tempfile.flush
+        @@tempfile.close
+
+        @@tempfile.path
       end
 
       def watch_command(always: false, poll: false, **kwargs)
@@ -39,38 +66,18 @@ module Tailwindcss
         defined?(Rails) && Rails&.application&.config&.assets&.css_compressor.present?
       end
 
-      def engines_tailwindcss_roots
+      def engines_roots
         return [] unless defined?(Rails)
+        return [] unless Rails.application&.config&.tailwindcss_rails&.engines
 
-        Rails::Engine.subclasses.select do |engine|
-          begin
-            spec = Gem::Specification.find_by_name(engine.engine_name)
-            spec.dependencies.any? { |d| d.name == 'tailwindcss-rails' }
-          rescue Gem::MissingSpecError
-            false
-          end
+        Rails::Engine.descendants.select do |engine|
+          engine.engine_name.in?(Rails.application.config.tailwindcss_rails.engines)
         end.map do |engine|
           [
-            Rails.root.join("app/assets/tailwind/#{engine.engine_name}/application.css"),
+            rails_root.join("app/assets/tailwind/#{engine.engine_name}/application.css"),
             engine.root.join("app/assets/tailwind/#{engine.engine_name}/application.css")
           ].select(&:exist?).compact.first.to_s
         end.compact
-      end
-
-      def enhance_command(command)
-        engine_roots = Tailwindcss::Commands.engines_tailwindcss_roots
-        if engine_roots.any?
-          Tempfile.create('tailwind.css') do |file|
-            file.write(engine_roots.map { |root| "@import \"#{root}\";" }.join("\n"))
-            file.write("\n@import \"#{Rails.root.join('app/assets/tailwind/application.css')}\";\n")
-            file.rewind
-            transformed_command = command.dup
-            transformed_command[2] = file.path
-            yield transformed_command if block_given?
-          end
-        else
-          yield command if block_given?
-        end
       end
     end
   end

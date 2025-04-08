@@ -23,7 +23,9 @@
   * [Using Tailwind plugins](#using-tailwind-plugins)
   * [Using with PostCSS](#using-with-postcss)
   * [Custom inputs or outputs](#custom-inputs-or-outputs)
+- [Rails Engines support](#rails-engines-support)
 - [Troubleshooting](#troubleshooting)
+  * [The `watch` command is hanging](#the-watch-command-is-hanging)
   * [Lost keystrokes or hanging when using terminal-based debugging tools (e.g. IRB, Pry, `ruby/debug`...etc.) with the Puma plugin](#lost-keystrokes-or-hanging-when-using-terminal-based-debugging-tools-eg-irb-pry-rubydebugetc-with-the-puma-plugin)
   * [Running in a docker container exits prematurely](#running-in-a-docker-container-exits-prematurely)
   * [Conflict with sassc-rails](#conflict-with-sassc-rails)
@@ -406,6 +408,14 @@ If you have Rails Engines in your application that use Tailwind CSS, they will b
 
 - The engine must have `tailwindcss-rails` as gem dependency.
 - The engine must have a `app/assets/tailwind/<engine_name>/application.css` file or your application must have overridden file in the same location of your application root.
+- The engine must register itself in Tailwindcss Rails:
+```ruby
+  initializer 'your_engine.tailwindcss' do |app|
+    ActiveSupport.on_load(:tailwindcss_rails) do
+      config.tailwindcss_rails.engines << Your::Engine.engine_name
+    end
+  end
+```
 
 ## Troubleshooting
 
